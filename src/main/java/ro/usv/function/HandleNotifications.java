@@ -7,51 +7,56 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 import com.microsoft.azure.functions.ExecutionContext;
+import com.microsoft.azure.functions.annotation.EventGridTrigger;
 import com.microsoft.azure.functions.annotation.FunctionName;
 
 import ro.usv.function.EventSchema.EventSchemaData.Body.Data.Vector3;
 
-import com.microsoft.azure.functions.annotation.EventGridTrigger;
-
-public class Function {
-    
-    private static final String NOTIFICATION_FORMAT = "Time '%s' | Axis '%s' | Displacement '%.2f' | Threshold '%.2f'";
+public class HandleNotifications {
 
     @FunctionName("handleNotifications")
     public void run(
-            @EventGridTrigger(name="event") EventSchema event,
+            @EventGridTrigger(name = "event") EventSchema event,
             final ExecutionContext context) {
 
-                List<Vector3> data = extractDataFromEventSchema(event);
-                List<Vector3> displacementList = computeDisplacements(data);
+        List<Vector3> data = extractDataFromEventSchema(event);
+        List<Vector3> displacementList = computeDisplacements(data);
 
-                String timeRange = timeRange(event);
-                context.getLogger().info(timeRange);
+        String timeRange = timeRange(event);
+        context.getLogger().info(timeRange);
 
-                Vector3 averageDisplacement = averageDisplacement(displacementList);
-                context.getLogger().info("Average displacement x: " + averageDisplacement.x);
-                context.getLogger().info("Average displacement y: " + averageDisplacement.y);
-                context.getLogger().info("Average displacement z: " + averageDisplacement.z);   
+        Vector3 averageDisplacement = averageDisplacement(displacementList);
+        context.getLogger().info("Average displacement x: " + averageDisplacement.x);
+        context.getLogger().info("Average displacement y: " + averageDisplacement.y);
+        context.getLogger().info("Average displacement z: " + averageDisplacement.z);
 
-                double max = Double.parseDouble(System.getenv("threshold"));
+        double max = Double.parseDouble(System.getenv("threshold"));
 
-                if (averageDisplacement.x > max) {
-                    context.getLogger().info("threshold passed on x");
-                    String message = String.format(NOTIFICATION_FORMAT, timeRange, "X", averageDisplacement.x, max);
-                } else if (averageDisplacement.y > max) {
-                    context.getLogger().info("threshold passed on y");
-                    String message = String.format(NOTIFICATION_FORMAT, timeRange, "Y", averageDisplacement.y, max);
-                } else if (averageDisplacement.z > max) {
-                    context.getLogger().info("threshold passed on z");
-                    String message = String.format(NOTIFICATION_FORMAT, timeRange, "Z", averageDisplacement.z, max);
-                } else {
-                    context.getLogger().info("No vibration detelcted");
-                }
+        StringBuilder messageBuilder = new StringBuilder();
 
+        if (averageDisplacement.x > max) {
+            context.getLogger().info("threshold passed on x");
+            messageBuilder.append(String.format("%s(%.2f); ", "x", averageDisplacement.x));
+        }
+        if (averageDisplacement.y > max) {
+            context.getLogger().info("threshold passed on y");
+            messageBuilder.append(String.format("%s(%.2f); ", "y", averageDisplacement.y));
+        }
+        if (averageDisplacement.z > max) {
+            context.getLogger().info("threshold passed on z");
+            messageBuilder.append(String.format("%s(%.2f); ", "z", averageDisplacement.z));
+        }
+        if (messageBuilder.length() == 0) {
+            context.getLogger().info("No vibration detelcted");
+        } else {
+            messageBuilder.insert(0, "Notification: ").append("Timerange(").append(timeRange).append(')');
+            new AzureIotClient(context.getLogger()).sendMessage(messageBuilder.toString());
         }
 
+    }
+
     private String timeRange(EventSchema event) {
-        SimpleDateFormat formatter = new SimpleDateFormat("dd-MM-yyyy HH:mm:ss.SSS");    
+        SimpleDateFormat formatter = new SimpleDateFormat("dd-MM-yyyy HH:mm:ss.SSS");
         Date startRange = new Date(event.data.body.telemetry.get(0).timestamp);
         Date endRange = new Date(event.data.body.telemetry.get(0).timestamp);
         return formatter.format(startRange) + " <=> " + formatter.format(endRange);
@@ -81,5 +86,4 @@ public class Function {
         displacement.z = displacementList.stream().mapToDouble(d -> d.z).average().orElse(.0);
         return displacement;
     }
-    }
-
+}
